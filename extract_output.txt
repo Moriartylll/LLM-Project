@@ -1,0 +1,105 @@
+[
+  {
+    "doc_id": "414e876f-73b1-4bf3-aaf6-e8b8cc892405",
+    "source_type": "pdf",
+    "file_name": "ICA-Supermarket-Medis-2025-09-27.pdf",
+    "store_name": "ICA Supermarket Medis",
+    "store_short_name": "MEDIS",
+    "org_number": "SE556466267301",
+    "time": "22:14",
+    "address": "Folkungagatan 56",
+    "zip_code": "11622",
+    "city": "Stockholm",
+    "vendor": "ICA",
+    "date": "2025-09-27",
+    "currency": "SEK",
+    "total": 240.75,
+    "line_items": [
+      {
+        "item_code": "7350068170058",
+        "description": "Apelsin Kiwi Ingef",
+        "qty": 1,
+        "unit_price": 57.95,
+        "line_total": 56.95,
+        "is_discounted": false,
+        "discount_amount_total": null,
+        "unit_price_after_discount": null,
+        "line_total_after_discount": null,
+        "promo_note": null
+      },
+      {
+        "item_code": "5449000133335",
+        "description": "CocaCola Zero150cl",
+        "qty": 3,
+        "unit_price": 18.67,
+        "line_total": 77.85,
+        "is_discounted": true,
+        "discount_amount_total": -27.85,
+        "unit_price_after_discount": 16.67,
+        "line_total_after_discount": 50,
+        "promo_note": "Läsk 3f50 kr"
+      },
+      {
+        "item_code": "7310531037202",
+        "description": "Dipmix Onion",
+        "qty": 1,
+        "unit_price": 12.95,
+        "line_total": 12.95,
+        "is_discounted": false,
+        "discount_amount_total": null,
+        "unit_price_after_discount": null,
+        "line_total_after_discount": null,
+        "promo_note": null
+      },
+      {
+        "item_code": "7310865074522",
+        "description": "Eko Lantm 3,8-4,5%",
+        "qty": 1,
+        "unit_price": 23.95,
+        "line_total": 23.95,
+        "is_discounted": false,
+        "discount_amount_total": null,
+        "unit_price_after_discount": null,
+        "line_total_after_discount": null,
+        "promo_note": null
+      },
+      {
+        "item_code": "7310865083418",
+        "description": "Gräddfil 12%",
+        "qty": 1,
+        "unit_price": 21.95,
+        "line_total": 21.95,
+        "is_discounted": false,
+        "discount_amount_total": null,
+        "unit_price_after_discount": null,
+        "line_total_after_discount": null,
+        "promo_note": null
+      },
+      {
+        "item_code": "7310532106518",
+        "description": "Vickningschips",
+        "qty": 1,
+        "unit_price": 37.95,
+        "line_total": 37.95,
+        "is_discounted": false,
+        "discount_amount_total": null,
+        "unit_price_after_discount": null,
+        "line_total_after_discount": null,
+        "promo_note": null
+      },
+      {
+        "item_code": "7340122601406",
+        "description": "Vindruvor",
+        "qty": 1,
+        "unit_price": 30,
+        "line_total": 30,
+        "is_discounted": false,
+        "discount_amount_total": null,
+        "unit_price_after_discount": null,
+        "line_total_after_discount": null,
+        "promo_note": null
+      }
+    ],
+    "preview": "Kvitto\nICA Supermarket Medis\nFolkungagatan 56\n11622 Stockholm\nMEDIS\nFolkungagatan 56\nTel. 08-462 30 30\nDatum\nTid\nOrg nr\nKvitto nr\nKassa\nKassör\n2025-09-27\n22:14\nSE556466267301\n7315\n04\n50997\nBeskrivning\nArtikelnummer\nPris\nMängd\nSumma(SEK)\nApelsin Kiwi Ingef\n7350068170058\n57,95\n1,00 st\n56,95\nPant\n1,00\n1\n1,00\n*CocaCola Zero150cl\n5449000133335\n18,67\n3,00 st\n77,85\nLäsk 3f50 kr\n-27,85\n*Pant\n2,00\n3\n6,00\nDipmix Onion\n7310531037202\n12,95\n1,00 st\n12,95\nEko Lantm 3,8-4,5%\n7310865074522\n23,95\n1,00 st\n23,95\nGräddfil 12%\n7310865083418\n21,95\n1,00 st\n21,95\nVickningschips\n7310532106518\n37,95\n1,00 st\n37,95\nVindruvor\n7340122601406\n30,00\n1,00 st\n30,00\nBetalat 240,75\nMoms %\nMoms\nNetto\nBrutto\n12,00\n25,80\n214,95\n240,75\nErhållen rabatt\n-27,85"
+  }
+]
