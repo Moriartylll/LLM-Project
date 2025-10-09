@@ -1,0 +1,22 @@
+# Core app
+gradio==5.44.1
+transformers==4.56.1
+accelerate==0.34.2
+huggingface-hub==0.35.3
+safetensors>=0.4.5
+tokenizers==0.22.1
+
+# OCR + imaging
+easyocr==1.7.2
+pillow==11.3.0
+opencv-python-headless==4.10.0.84
+
+# PDF parsing
+pymupdf==1.24.13
+pdfplumber==0.11.4
+pdfminer.six==20250506
+
+# Data / validation
+pydantic==2.11.10
+numpy==2.0.2
+pandas==2.2.3
