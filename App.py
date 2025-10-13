@@ -1,5 +1,5 @@
 # app.py
-import io, re, uuid, json, warnings, os, traceback
+import io, re, uuid, json, warnings, os, traceback, sqlite3
 from datetime import datetime
 from typing import List, Optional, Dict
 
@@ -27,6 +27,9 @@ IMG_MAX = (1600, 1600)
 EXCLUDE_PANT = True
 INCLUDE_DISCOUNTS = True
 
+# Database file
+DB_NAME = "receipts.db"
+
 # Init OCR (uses CUDA if available)
 reader = easyocr.Reader(OCR_LANGS, gpu=True)
 
@@ -34,6 +37,235 @@ reader = easyocr.Reader(OCR_LANGS, gpu=True)
 tok = AutoTokenizer.from_pretrained(CHAT_MODEL)
 mdl = AutoModelForCausalLM.from_pretrained(CHAT_MODEL)
 chat = pipeline("text-generation", model=mdl, tokenizer=tok, max_new_tokens=256, temperature=0.2, top_p=0.9)
+
+# ---------------- Database Functions ----------------
+def create_database():
+    """Create the database and tables if they don't exist."""
+    connection = sqlite3.connect(DB_NAME)
+    cursor = connection.cursor()
+
+    # Create the Stores table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS stores (
+        store_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        address TEXT,
+        zip_code TEXT,
+        city TEXT,
+        short_name TEXT,
+        phone_number TEXT,
+        org_number TEXT UNIQUE NOT NULL
+    )
+    """)
+
+    # Create the Items table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS items (
+        item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        description TEXT NOT NULL,
+        article_number TEXT,
+        price REAL,
+        quantity REAL,
+        total REAL,
+        discount REAL,
+        category TEXT,
+        store_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        comparison_price REAL,
+        comparison_price_unit TEXT,
+        FOREIGN KEY (store_id) REFERENCES stores(store_id)
+    )
+    """)
+
+    connection.commit()
+    connection.close()
+
+
+def add_store(name, address=None, zip_code=None, city=None, short_name=None, phone_number=None, org_number=None):
+    """
+    Add a new store to the database if it doesn't exist.
+    If the store already exists (based on org_number or name), return the existing store_id.
+
+    Returns:
+        tuple: (store_id, was_created) where was_created is True if new store was added
+    """
+    connection = sqlite3.connect(DB_NAME)
+    cursor = connection.cursor()
+
+    # If org_number provided, check by org_number first
+    if org_number:
+        cursor.execute("SELECT store_id FROM stores WHERE org_number = ?", (org_number,))
+        existing_store = cursor.fetchone()
+        if existing_store:
+            connection.close()
+            return existing_store[0], False
+
+    # Otherwise check by name
+    cursor.execute("SELECT store_id FROM stores WHERE name = ?", (name,))
+    existing_store = cursor.fetchone()
+    if existing_store:
+        connection.close()
+        return existing_store[0], False
+
+    # Generate org_number if not provided
+    if not org_number:
+        org_number = f"UNKNOWN-{uuid.uuid4().hex[:12]}"
+
+    # Store doesn't exist, insert it
+    cursor.execute(
+        """
+    INSERT INTO stores (name, address, zip_code, city, short_name, phone_number, org_number)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """,
+        (name, address, zip_code, city, short_name, phone_number, org_number),
+    )
+
+    connection.commit()
+    store_id = cursor.lastrowid
+    connection.close()
+
+    return store_id, True
+
+
+def add_item(
+    description,
+    article_number,
+    price,
+    quantity,
+    total,
+    discount,
+    category,
+    store_id,
+    purchase_date,
+    comparison_price=None,
+    comparison_price_unit=None,
+):
+    """
+    Add a new item to the database if it doesn't exist.
+    If an identical item already exists, return the existing item_id.
+
+    Returns:
+        tuple: (item_id, was_created) where was_created is True if new item was added
+    """
+    connection = sqlite3.connect(DB_NAME)
+    cursor = connection.cursor()
+
+    # Check if item already exists (matching all fields)
+    cursor.execute(
+        """
+    SELECT item_id FROM items
+    WHERE description = ?
+      AND article_number IS ?
+      AND price = ?
+      AND quantity = ?
+      AND total = ?
+      AND discount = ?
+      AND category IS ?
+      AND store_id = ?
+      AND date = ?
+      AND comparison_price IS ?
+      AND comparison_price_unit IS ?
+    """,
+        (
+            description,
+            article_number,
+            price,
+            quantity,
+            total,
+            discount,
+            category,
+            store_id,
+            purchase_date,
+            comparison_price,
+            comparison_price_unit,
+        ),
+    )
+
+    existing_item = cursor.fetchone()
+
+    if existing_item:
+        # Item already exists, return its ID
+        connection.close()
+        return existing_item[0], False
+
+    # Item doesn't exist, insert it
+    cursor.execute(
+        """
+    INSERT INTO items (description, article_number, price, quantity, total,
+                      discount, category, store_id, date, comparison_price,
+                      comparison_price_unit)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+        (
+            description,
+            article_number,
+            price,
+            quantity,
+            total,
+            discount,
+            category,
+            store_id,
+            purchase_date,
+            comparison_price,
+            comparison_price_unit,
+        ),
+    )
+
+    connection.commit()
+    item_id = cursor.lastrowid
+    connection.close()
+
+    return item_id, True
+
+
+def get_all_receipts_from_db():
+    """Retrieve all receipts from database grouped by store and date."""
+    connection = sqlite3.connect(DB_NAME)
+    cursor = connection.cursor()
+    
+    cursor.execute("""
+    SELECT 
+        s.store_id, s.name, s.address, s.city, s.org_number,
+        i.item_id, i.description, i.article_number, i.price, i.quantity,
+        i.total, i.discount, i.category, i.date, i.comparison_price,
+        i.comparison_price_unit
+    FROM items i
+    JOIN stores s ON i.store_id = s.store_id
+    ORDER BY i.date DESC, s.name, i.item_id
+    """)
+    
+    rows = cursor.fetchall()
+    connection.close()
+    
+    # Group by (store_id, date) to reconstruct receipts
+    receipts_dict = {}
+    for row in rows:
+        store_id, store_name, address, city, org_number = row[:5]
+        item_data = row[5:]
+        
+        key = (store_id, item_data[7])  # (store_id, date)
+        
+        if key not in receipts_dict:
+            receipts_dict[key] = {
+                "vendor": store_name,
+                "date": item_data[7],
+                "store_id": store_id,
+                "items": []
+            }
+        
+        receipts_dict[key]["items"].append({
+            "item_id": item_data[0],
+            "description": item_data[1],
+            "article_number": item_data[2],
+            "price": item_data[3],
+            "quantity": item_data[4],
+            "total": item_data[5],
+            "discount": item_data[6],
+            "category": item_data[7]
+        })
+    
+    return list(receipts_dict.values())
+
 
 # ---------------- Regex / helpers ----------------
 CURRENCY_RE = re.compile(r"(SEK|kr|kronor)", re.I)
@@ -69,7 +301,7 @@ TABLE_ROW_RE = re.compile(
     re.X
 )
 
-# Fallback: "desc ... sum" (no code/qty known) — require at least one letter in desc to avoid numeric-only lines
+# Fallback: "desc ... sum" (no code/qty known) – require at least one letter in desc to avoid numeric-only lines
 PRICE_AT_END_FALLBACK_RE = re.compile(
     r"""^
         (?P<desc>(?=.*[A-Za-zÅÄÖåäö]).{3,80}?)\s+
@@ -150,6 +382,7 @@ class Receipt(BaseModel):
     total: Optional[float] = None
     line_items: List[LineItem] = Field(default_factory=list)
     preview: Optional[str] = None
+    store_id: Optional[int] = None  # Added for DB reference
 
 RECEIPTS: Dict[str, Receipt] = {}
 
@@ -269,10 +502,6 @@ def parse_lines_to_receipt(lines: List[str], file_name: str, source_type: str) -
                     it.promo_note = desc if it.promo_note in (None, "*") else (it.promo_note + " | " + desc)
                     continue  # don't append as its own item
 
-            # Not a discount → ignore weird footer lines even if they match fallback (shouldn't due to letters requirement)
-            # If you still want to keep plain non-negative fallback lines as items, uncomment below:
-            # items.append(LineItem(description=desc, qty=1.0, unit_price=None, line_total=lsum))
-
     # Clean-up: if something was marked "*" but got no discount line, drop the marker
     for it in items:
         if it.promo_note == "*":
@@ -341,9 +570,52 @@ def extract_from_image(image_bytes: bytes, file_name: str) -> Receipt:
     lines = [L.strip() for L in text.splitlines() if L.strip()]
     return parse_lines_to_receipt(lines, file_name, "image")
 
+# ---------------- Save receipt to database ----------------
+def save_receipt_to_db(receipt: Receipt):
+    """Save a receipt to the database."""
+    # Add store (or get existing)
+    store_id, _ = add_store(
+        name=receipt.vendor or "Unknown Store",
+        org_number=None  # We don't extract org_number from receipts yet
+    )
+    receipt.store_id = store_id
+    
+    # Add each item
+    purchase_date = receipt.date or datetime.now().date().isoformat()
+    
+    stats = {"new": 0, "existing": 0}
+    for item in receipt.line_items:
+        # Calculate final price and discount
+        final_total = item.line_total_after_discount if item.is_discounted else item.line_total
+        discount_amount = abs(item.discount_amount_total) if item.discount_amount_total else 0.0
+        
+        _, was_created = add_item(
+            description=item.description,
+            article_number=item.item_code,
+            price=item.unit_price,
+            quantity=item.qty,
+            total=final_total,
+            discount=discount_amount,
+            category=None,  # We don't extract category yet
+            store_id=store_id,
+            purchase_date=purchase_date,
+            comparison_price=None,
+            comparison_price_unit=None
+        )
+        
+        if was_created:
+            stats["new"] += 1
+        else:
+            stats["existing"] += 1
+    
+    return stats
+
 # ---------------- Chat ----------------
 def build_context() -> str:
+    """Build context from both in-memory receipts and database."""
     rows = []
+    
+    # Add in-memory receipts
     for r in RECEIPTS.values():
         rows.append({
             "doc_id": r.doc_id,
@@ -366,6 +638,16 @@ def build_context() -> str:
                 } for li in r.line_items
             ]
         })
+    
+    # Add database receipts
+    db_receipts = get_all_receipts_from_db()
+    for r in db_receipts:
+        rows.append({
+            "vendor": r["vendor"],
+            "date": r["date"],
+            "items": r["items"]
+        })
+    
     s = json.dumps(rows, ensure_ascii=False)
     return s[:MAX_CTX_JSON_CHARS]
 
@@ -376,7 +658,7 @@ SYSTEM_PROMPT = (
 )
 
 def chat_respond(message, history):
-    if not RECEIPTS:
+    if not RECEIPTS and not get_all_receipts_from_db():
         reply = "I have no receipts yet. Please upload a PDF or image first."
         return history + [(message, reply)], gr.update(value="")
     ctx = build_context()
@@ -403,20 +685,77 @@ def do_extract(files):
                 rec = extract_from_pdf(data, name)
             else:
                 rec = extract_from_image(data, name)
+            
+            # Save to database
+            stats = save_receipt_to_db(rec)
+            
+            # Keep in memory too
             RECEIPTS[rec.doc_id] = rec
-            results.append(rec.model_dump())
+            
+            result = rec.model_dump()
+            result["db_stats"] = stats
+            results.append(result)
         except Exception as e:
             print("[extract error]", name if 'name' in locals() else f, "->", e)
             traceback.print_exc()
             results.append({"file": name if 'name' in locals() else str(f), "error": str(e)})
     return results
 
-with gr.Blocks(title="Receipt Analyzer (Conda)") as demo:
-    gr.Markdown("## 🧾 Receipt Analyzer\nUpload PDFs or images → extract → chat about prices (e.g., *What did milk cost at ICA?*)")
+def view_database():
+    """Return database contents as formatted text."""
+    connection = sqlite3.connect(DB_NAME)
+    cursor = connection.cursor()
+    
+    # Get store count
+    cursor.execute("SELECT COUNT(*) FROM stores")
+    store_count = cursor.fetchone()[0]
+    
+    # Get item count
+    cursor.execute("SELECT COUNT(*) FROM items")
+    item_count = cursor.fetchone()[0]
+    
+    # Get recent items
+    cursor.execute("""
+    SELECT s.name, i.date, i.description, i.price, i.quantity, i.total, i.discount
+    FROM items i
+    JOIN stores s ON i.store_id = s.store_id
+    ORDER BY i.date DESC, i.item_id DESC
+    LIMIT 50
+    """)
+    
+    items = cursor.fetchall()
+    connection.close()
+    
+    output = f"**Database Statistics**\n"
+    output += f"- Total Stores: {store_count}\n"
+    output += f"- Total Items: {item_count}\n\n"
+    output += "**Recent Items (last 50):**\n\n"
+    
+    for item in items:
+        store, date, desc, price, qty, total, discount = item
+        discount_str = f" (discount: {discount} kr)" if discount else ""
+        output += f"- **{store}** ({date}): {desc} - {qty}x @ {price} kr = {total} kr{discount_str}\n"
+    
+    return output
+
+def clear_database():
+    """Clear all data from database."""
+    connection = sqlite3.connect(DB_NAME)
+    cursor = connection.cursor()
+    cursor.execute("DELETE FROM items")
+    cursor.execute("DELETE FROM stores")
+    connection.commit()
+    connection.close()
+    RECEIPTS.clear()
+    return "Database cleared successfully!"
+
+with gr.Blocks(title="Receipt Analyzer (Conda + DB)") as demo:
+    gr.Markdown("## 🧾 Receipt Analyzer\nUpload PDFs or images → extract → auto-save to database → chat about prices")
+    
     with gr.Tab("1) Upload & Extract"):
         files = gr.File(file_count="multiple", file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Upload receipts")
-        out = gr.JSON(label="Parsed receipts (JSON)")
-        gr.Button("Extract").click(do_extract, inputs=files, outputs=out)
+        out = gr.JSON(label="Parsed receipts (JSON) - includes DB stats")
+        gr.Button("Extract & Save to DB").click(do_extract, inputs=files, outputs=out)
 
     with gr.Tab("2) Chat"):
         chatbot = gr.Chatbot(label="Chat", height=420)
@@ -426,7 +765,23 @@ with gr.Blocks(title="Receipt Analyzer (Conda)") as demo:
         send.click(chat_respond, inputs=[msg, chatbot], outputs=[chatbot, msg])
         msg.submit(chat_respond, inputs=[msg, chatbot], outputs=[chatbot, msg])
         clear.click(lambda: ([], ""), outputs=[chatbot, msg])
+    
+    with gr.Tab("3) Database View"):
+        gr.Markdown("### View stored receipts and items")
+        db_output = gr.Markdown()
+        with gr.Row():
+            refresh_btn = gr.Button("Refresh View", variant="primary")
+            clear_db_btn = gr.Button("Clear Database", variant="stop")
+        
+        refresh_btn.click(view_database, outputs=db_output)
+        clear_db_btn.click(clear_database, outputs=db_output)
+        
+        # Load database view on tab open
+        demo.load(view_database, outputs=db_output)
 
 if __name__ == "__main__":
+    # Initialize database on startup
+    print("[startup] Creating database if needed...")
+    create_database()
     print("[run] starting Gradio on http://127.0.0.1:7860 …")
     demo.launch(server_name="127.0.0.1", server_port=7860, share=False)
