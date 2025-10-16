@@ -16,7 +16,7 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS stores (
         store_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
+        name TEXT,
         address TEXT,
         post_address TEXT,
         short_name TEXT,
@@ -25,6 +25,16 @@ def init_db():
     )
     """)
 
+    # Create the Receipts table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS receipts (
+        receipt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id INTEGER,
+        date TEXT NOT NULL,
+        total REAL,
+        FOREIGN KEY (store_id) REFERENCES stores(store_id)
+    )
+    """)
     
     # Create the Items table
     cursor.execute("""
@@ -38,16 +48,58 @@ def init_db():
         discount REAL,
         category TEXT,
         store_id INTEGER NOT NULL,
+        receipt_id INTEGER,
         date TEXT NOT NULL,
         comparison_price REAL,
         comparison_price_unit TEXT,
-        FOREIGN KEY (store_id) REFERENCES stores(store_id)
+        FOREIGN KEY (store_id) REFERENCES stores(store_id),
+        FOREIGN KEY (receipt_id) REFERENCES receipts(receipt_id)
     )
     """)
 
     connection.commit()
     connection.close()
 
+def add_receipt_to_db(
+    store_id: Optional[int] = None,
+    date: Optional[str] = None,
+    total: Optional[float] = None,
+    store_existed: Optional[bool] = False,
+) -> Tuple[int, bool]:
+    """
+    Add a new receipt to the database
+
+    Returns:
+        tuple: (receipt_id, was_created) where was_created is True if new receipt was added
+    """
+    connection = sqlite3.connect(DB_NAME)
+    cursor = connection.cursor()
+    
+    if store_existed:
+        # Duplicate detection by date + total (only if both provided)
+        if date is not None and total is not None:
+            cursor.execute(
+                "SELECT receipt_id FROM receipts WHERE date = ? AND total = ?",
+                (date, total),
+            )
+            existing_receipt = cursor.fetchone()
+            if existing_receipt:
+                connection.close()
+                return existing_receipt[0], False
+    # No duplicate found — insert new receipt
+    cursor.execute(
+        """
+        INSERT INTO receipts (store_id, date, total)
+        VALUES (?, ?, ?)
+        """,
+        (store_id, date, total),
+    )
+
+    connection.commit()
+    receipt_id = cursor.lastrowid
+    connection.close()
+
+    return receipt_id, True
 
 def add_store_to_db(
     name: Optional[str] = None,
@@ -78,9 +130,9 @@ def add_store_to_db(
     # Store doesn't exist, insert it
     cursor.execute(
         """
-    INSERT INTO stores (name, address, post_address, short_name, phone_number, org_number)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """,
+        INSERT INTO stores (name, address, post_address, short_name, phone_number, org_number)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
         (name, address, post_address, short_name, phone_number, org_number),
     )
 
@@ -100,6 +152,7 @@ def add_item_to_db(
     discount: float,
     category: Optional[str],
     store_id: int,
+    receipt_id: int,
     purchase_date: str,
     comparison_price: Optional[float] = None,
     comparison_price_unit: Optional[str] = None,
@@ -117,19 +170,20 @@ def add_item_to_db(
     # Check if item already exists (matching all fields)
     cursor.execute(
         """
-    SELECT item_id FROM items
-    WHERE description = ?
-      AND article_number IS ?
-      AND price = ?
-      AND quantity = ?
-      AND total = ?
-      AND discount = ?
-      AND category IS ?
-      AND store_id = ?
-      AND date = ?
-      AND comparison_price IS ?
-      AND comparison_price_unit IS ?
-    """,
+        SELECT item_id FROM items
+        WHERE description = ?
+          AND article_number IS ?
+          AND price = ?
+          AND quantity = ?
+          AND total = ?
+          AND discount = ?
+          AND category IS ?
+          AND store_id = ?
+          AND receipt_id = ?
+          AND date = ?
+          AND comparison_price IS ?
+          AND comparison_price_unit IS ?
+        """,
         (
             description,
             article_number,
@@ -139,6 +193,7 @@ def add_item_to_db(
             discount,
             category,
             store_id,
+            receipt_id,
             purchase_date,
             comparison_price,
             comparison_price_unit,
@@ -155,11 +210,11 @@ def add_item_to_db(
     # Item doesn't exist, insert it
     cursor.execute(
         """
-    INSERT INTO items (description, article_number, price, quantity, total,
-                      discount, category, store_id, date, comparison_price,
-                      comparison_price_unit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """,
+        INSERT INTO items (description, article_number, price, quantity, total,
+                          discount, category, store_id, receipt_id, date, comparison_price,
+                          comparison_price_unit)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
         (
             description,
             article_number,
@@ -169,6 +224,7 @@ def add_item_to_db(
             discount,
             category,
             store_id,
+            receipt_id,
             purchase_date,
             comparison_price,
             comparison_price_unit,
@@ -240,6 +296,10 @@ def get_stats_from_db() -> Dict:
     cursor.execute("SELECT COUNT(*) FROM stores")
     store_count = cursor.fetchone()[0]
     
+    # Get receipt count
+    cursor.execute("SELECT COUNT(*) FROM receipts")
+    receipt_count = cursor.fetchone()[0]
+    
     # Get item count
     cursor.execute("SELECT COUNT(*) FROM items")
     item_count = cursor.fetchone()[0]
@@ -252,6 +312,7 @@ def get_stats_from_db() -> Dict:
     
     return {
         "store_count": store_count,
+        "receipt_count": receipt_count,
         "item_count": item_count,
         "earliest_date": date_range[0],
         "latest_date": date_range[1]
@@ -283,6 +344,7 @@ def clear_db():
     cursor = connection.cursor()
     cursor.execute("DELETE FROM items")
     cursor.execute("DELETE FROM stores")
+    cursor.execute("DELETE FROM receipts")
     connection.commit()
     connection.close()
 
@@ -343,10 +405,14 @@ def view_db():
     items = get_recent_items(50)
 
     output = "**Database Statistics**\n"
-    output += f"- Total Stores: {stats['store_count']}\n"
-    output += f"- Total Items: {stats['item_count']}\n"
+    
     if stats['earliest_date']:
         output += f"- Date Range: {stats['earliest_date']} to {stats['latest_date']}\n"
+        
+    output += f"- Total Stores: {stats['store_count']}\n"
+    output += f"- Total Receipts: {stats['receipt_count']}\n"
+    output += f"- Total Items: {stats['item_count']}\n"
+    
     output += "\n**Recent Items (last 50):**\n\n"
 
     for item in items:

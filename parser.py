@@ -48,7 +48,7 @@ class LineItem(BaseModel):
 
 
 class Receipt(BaseModel):
-    receipt_id: str
+    doc_id: str
     source_type: str  # "pdf" | "image"
     file_name: str
     vendor: Optional[str] = None
@@ -60,6 +60,7 @@ class Receipt(BaseModel):
     total: Optional[float] = None
     line_items: List[LineItem] = Field(default_factory=list)
     preview: Optional[str] = None
+    receipt_id: Optional[int] = None  # Added later DB reference
     store_id: Optional[int] = None  # Added later DB reference
 
 
@@ -113,7 +114,7 @@ PRICE_AT_END_FALLBACK_RE = re.compile(
 # ---------------- Parsing logic ----------------
 def parse_lines_to_receipt(lines: List[str], file_name: str, source_type: str) -> Receipt:
     """Parse text lines into a structured Receipt object."""
-    receipt_id = str(uuid.uuid4())
+    doc_id = str(uuid.uuid4())
     
     print(lines[1])
     
@@ -250,7 +251,7 @@ def parse_lines_to_receipt(lines: List[str], file_name: str, source_type: str) -
             it.promo_note = None
 
     return Receipt(
-        receipt_id=receipt_id,
+        doc_id=doc_id,
         source_type=source_type,
         file_name=file_name,
         vendor=vendor,

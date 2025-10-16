@@ -2,6 +2,7 @@
 
 import json
 import traceback
+from datetime import datetime
 from typing import Dict
 
 import gradio as gr
@@ -10,7 +11,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
 # Import from database.py
 from db import (
-    init_db, add_store_to_db, add_item_to_db, get_all_receipts_from_db,
+    init_db, add_store_to_db, add_receipt_to_db, add_item_to_db, get_all_receipts_from_db,
     get_stats_from_db, get_recent_items, clear_db, search_items, view_db
 )
 
@@ -156,8 +157,8 @@ def do_extract(files):
 # Save receipt to database
 def save_receipt_to_db(receipt: Receipt):
     
-    # Add store (or get existing store_id
-    store_id, _ = add_store_to_db(
+    # Add store (or get existing store_id)
+    store_id, store_existed = add_store_to_db(
         name=receipt.store_name,
         address=receipt.address,
         post_address=receipt.post_address,
@@ -167,34 +168,39 @@ def save_receipt_to_db(receipt: Receipt):
     )
     receipt.store_id = store_id
 
-    # Add each item
-    purchase_date = receipt.date or datetime.now().date().isoformat()
+    # Add receipt
+    receipt_id, receipt_existed = add_receipt_to_db(
+        store_id=store_id,
+        date=receipt.date,
+        total=receipt.total,
+        store_existed=store_existed,
+    )
+    receipt.receipt_id = receipt_id 
 
+    if not receipt_existed:
+        purchase_date = receipt.date or datetime.now().date().isoformat() # Also stored in receipt table
+        
+        for item in receipt.line_items:
+            # Calculate final price and discount
+            final_total = item.line_total_after_discount if item.is_discounted else item.line_total
+            discount_amount = abs(item.discount_amount_total) if item.discount_amount_total else 0.0
+            
+            _, was_created = add_item_to_db(
+                description=item.description,
+                article_number=item.item_code,
+                price=item.unit_price,
+                quantity=item.qty,
+                total=final_total,
+                discount=discount_amount,
+                category=None,  # We don't extract category yet
+                store_id=store_id,
+                receipt_id=receipt_id,
+                purchase_date=purchase_date, # Also stored in receipt table
+                comparison_price=None,
+                comparison_price_unit=None
+            )
+    
     stats = {"new": 0, "existing": 0}
-    for item in receipt.line_items:
-        # Calculate final price and discount
-        final_total = item.line_total_after_discount if item.is_discounted else item.line_total
-        discount_amount = abs(item.discount_amount_total) if item.discount_amount_total else 0.0
-
-        _, was_created = add_item_to_db(
-            description=item.description,
-            article_number=item.item_code,
-            price=item.unit_price,
-            quantity=item.qty,
-            total=final_total,
-            discount=discount_amount,
-            category=None,  # We don't extract category yet
-            store_id=store_id,
-            purchase_date=purchase_date,
-            comparison_price=None,
-            comparison_price_unit=None
-        )
-
-        if was_created:
-            stats["new"] += 1
-        else:
-            stats["existing"] += 1
-
     return stats    
 
 # Gradio Interface
