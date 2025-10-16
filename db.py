@@ -242,53 +242,104 @@ def add_item_to_db(
 
 
 def get_all_receipts_from_db() -> List[Dict]:
-    """Retrieve all receipts from database grouped by store and date."""
+    """Retrieve all receipts with store and items.
+
+    Returns a list of receipts where each receipt is a dict:
+    {
+      "receipt_id": int,
+      "store_id": int,
+      "store_name": str,
+      "date": str,
+      "total": float,
+      "items": [
+        {
+          "item_id": int,
+          "description": str,
+          "article_number": str,
+          "price": float,
+          "quantity": float,
+          "total": float,
+          "discount": float
+        }, ...
+      ]
+    }
+    """
+    connection = sqlite3.connect(DB_NAME)
+    cursor = connection.cursor()
+
+    cursor.execute("""
+    SELECT
+        r.receipt_id,
+        r.store_id,
+        s.name AS store_name,
+        r.date AS receipt_date,
+        r.total AS receipt_total,
+        i.item_id,
+        i.description,
+        i.article_number,
+        i.price,
+        i.quantity,
+        i.total AS item_total,
+        i.discount
+    FROM receipts r
+    LEFT JOIN stores s ON r.store_id = s.store_id
+    LEFT JOIN items i ON r.receipt_id = i.receipt_id
+    ORDER BY r.date DESC, s.name, r.receipt_id, i.item_id
+    """)
+
+    rows = cursor.fetchall()
+    connection.close()
+
+    receipts_map: Dict[int, Dict] = {}
+    for row in rows:
+        (
+            receipt_id,
+            store_id,
+            store_name,
+            receipt_date,
+            receipt_total,
+            item_id,
+            description,
+            article_number,
+            price,
+            quantity,
+            item_total,
+            discount,
+        ) = row
+
+        if receipt_id not in receipts_map:
+            receipts_map[receipt_id] = {
+                "receipt_id": receipt_id,
+                "store_id": store_id,
+                "store_name": store_name,
+                "date": receipt_date,
+                "total": receipt_total,
+                "items": []
+            }
+
+        # If there is an associated item row, append it
+        if item_id is not None:
+            receipts_map[receipt_id]["items"].append({
+                "description": description,
+                "article_number": article_number,
+                "price": price,
+                "quantity": quantity,
+                "total": item_total,
+                "discount": discount,
+            })
+
+    return list(receipts_map.values())
+
+def get_number_of_receipts_in_db() -> int:
+    """Get the total number of receipts in the database."""
     connection = sqlite3.connect(DB_NAME)
     cursor = connection.cursor()
     
-    cursor.execute("""
-    SELECT 
-        s.store_id, s.name, s.address, s.post_address,
-        i.item_id, i.description, i.article_number, i.price, i.quantity,
-        i.total, i.discount, i.category, i.date, i.comparison_price,
-        i.comparison_price_unit
-    FROM items i
-    JOIN stores s ON i.store_id = s.store_id
-    ORDER BY i.date DESC, s.name, i.item_id
-    """)
+    cursor.execute("SELECT COUNT(*) FROM receipts")
+    count = cursor.fetchone()[0]
     
-    rows = cursor.fetchall()
     connection.close()
-    
-    # Group by (store_id, date) to reconstruct receipts
-    receipts_dict = {}
-    for row in rows:
-        store_id, name, address, post_address = row[:4]
-        item_data = row[5:]
-        
-        key = (store_id, item_data[7])  # (store_id, date)
-        
-        if key not in receipts_dict:
-            receipts_dict[key] = {
-                "store_name": name,
-                "date": item_data[7],
-                "store_id": store_id,
-                "items": []
-            }
-        
-        receipts_dict[key]["items"].append({
-            "item_id": item_data[0],
-            "description": item_data[1],
-            "article_number": item_data[2],
-            "price": item_data[3],
-            "quantity": item_data[4],
-            "total": item_data[5],
-            "discount": item_data[6],
-            "category": item_data[7]
-        })
-    
-    return list(receipts_dict.values())
-
+    return count
 
 def get_stats_from_db() -> Dict:
     """Get statistics about the database."""

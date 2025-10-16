@@ -12,7 +12,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 # Import from database.py
 from db import (
     init_db, add_store_to_db, add_receipt_to_db, add_item_to_db, get_all_receipts_from_db,
-    get_stats_from_db, get_recent_items, clear_db, search_items, view_db
+    get_stats_from_db, get_recent_items, clear_db, search_items, view_db, get_number_of_receipts_in_db
 )
 
 # Import from parser.py
@@ -21,19 +21,37 @@ from parser import Receipt, extract_from_pdf, extract_from_image
 # Import from utils.py
 from utils import read_file_bytes
 
-
-# Store receipts in memory
-RECEIPTS: Dict[str, Receipt] = {}
-
 # ---------------- Config ----------------
 CHAT_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
 SYSTEM_PROMPT = (
     "You are a helpful assistant for Swedish shopping receipts. "
     "Only answer using the receipts context below. Prices are SEK unless stated. "
     "If unsure, say you don't know."
 )
 
-MAX_CTX_JSON_CHARS = 6000
+# Human-readable schema/instruction for the receipts JSON that is prepended to the LLM prompt.
+RECEIPTS_SCHEMA = (
+    "Receipts JSON structure:\n"
+    "- A list of receipts. Each receipt object has:\n"
+    "  - receipt_id: int\n"
+    "  - store_id: int | null\n"
+    "  - store_name: string\n"
+    "  - date: string (ISO date, YYYY-MM-DD)\n"
+    "  - total: number (receipt total, in SEK)\n"
+    "  - items: list of item objects\n"
+    "    - item object fields:\n"
+    "      - item_id: int | null\n"
+    "      - description: string\n"
+    "      - article_number: string | null\n"
+    "      - price: number (unit price, SEK)\n"
+    "      - quantity: number\n"
+    "      - total: number (line total, SEK)\n"
+    "      - discount: number | null (discount amount on line)\n"
+    "Only use these fields from the RECEIPTS_CONTEXT when answering. Do not invent values."
+)
+
+MAX_CTX_JSON_CHARS = 2048
 
 # Init chat model (GPU if available)
 tok = AutoTokenizer.from_pretrained(CHAT_MODEL)
@@ -46,83 +64,104 @@ def build_context() -> str:
     """Build context from both in-memory receipts and database."""
     rows = []
 
-    # Add in-memory receipts
-    for r in RECEIPTS.values():
-        rows.append({
-            "receipt_id": r.receipt_id,
-            "store_name": r.store_name,
-            "date": r.date,
-            "total": r.total,
-            "items": [
-                {
-                    "code": li.item_code,
-                    "desc": li.description,
-                    "qty": li.qty,
-                    "unit_price": li.unit_price,
-                    "line_total": li.line_total,
-                    "is_discounted": li.is_discounted,
-                    "discount_amount_total": li.discount_amount_total,
-                    "unit_price_after_discount": li.unit_price_after_discount,
-                    "line_total_after_discount": li.line_total_after_discount,
-                    "promo_note": li.promo_note
-                } for li in r.line_items
-            ]
-        })
-
     # Add database receipts
     db_receipts = get_all_receipts_from_db()
-    for r in db_receipts:
-        rows.append({
-            "store_name": r["store_name"],
-            "date": r["date"],
-            "items": r["items"]
-        })
-
-    s = json.dumps(rows, ensure_ascii=False)
+    
+    s = json.dumps(db_receipts, ensure_ascii=False, default=str, indent=2)
+    print(s[:MAX_CTX_JSON_CHARS])
     return s[:MAX_CTX_JSON_CHARS]
-
 
 # Chat respond 
 def chat_respond(message, history):
-    """Respond to chat messages using LLM."""
-    # Initialize history as empty list if None
+    """Respond to chat messages using LLM.
+
+    - Accepts history as either list-of-tuples [(user, assistant), ...] (Gradio typical)
+      or list-of-dicts [{"role":"user"/"assistant","content": "..."}, ...].
+    - Preserves the incoming history format when returning the updated history.
+    - Prepends a small human-readable schema before the receipts JSON so the LLM
+      understands the structure.
+    """
+    # Normalize history container
     if history is None:
         history = []
-    
-    if not RECEIPTS and not get_all_receipts_from_db():
+
+    # If no receipts, return helpful message without calling the model
+    if get_number_of_receipts_in_db() == 0:
         reply = "I have no receipts yet. Please upload a PDF or image first."
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": reply})
-        return history, ""
-    
-    ctx = build_context()
+        # preserve incoming format when returning
+        if len(history) > 0 and isinstance(history[0], (list, tuple)):
+            new_history = history.copy()
+            new_history.append((message, reply))
+            return new_history, ""
+        else:
+            new_history = history.copy()
+            new_history.append({"role": "user", "content": message})
+            new_history.append({"role": "assistant", "content": reply})
+            return new_history, ""
+
+    # Build transcript from history (works for both formats)
     transcript = ""
-    for msg in history:
-        role = "User" if msg["role"] == "user" else "Assistant"
-        transcript += f"{role}: {msg['content']}\n"
-    
+    incoming_is_tuple_pairs = False
+    if len(history) > 0 and isinstance(history[0], (list, tuple)):
+        incoming_is_tuple_pairs = True
+        for u, a in history:
+            if u:
+                transcript += f"User: {u}\n"
+            if a:
+                transcript += f"Assistant: {a}\n"
+    else:
+        for msg in history:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "user":
+                transcript += f"User: {content}\n"
+            else:
+                transcript += f"Assistant: {content}\n"
+
+    # Build prompt with schema + receipts context
+    ctx = build_context()
     prompt = (
         f"{SYSTEM_PROMPT}\n\n"
+        f"{RECEIPTS_SCHEMA}\n\n"
         f"RECEIPTS_CONTEXT:\n{ctx}\n\n"
         f"{transcript}"
         f"User: {message}\nAssistant:"
     )
-    
-    out = chat(prompt)[0]["generated_text"]
-    reply = out.split("Assistant:")[-1].strip()
-    
-    history.append({"role": "user", "content": message})
-    history.append({"role": "assistant", "content": reply})
-    
-    return history, ""
+
+    # Call LLM (protect with try/except)
+    try:
+        out = chat(prompt)[0]["generated_text"]
+        reply = out.split("Assistant:")[-1].strip()
+    except Exception as e:
+        # On error, return a short error reply and preserve history format
+        err_msg = f"[LLM error] {str(e)}"
+        if incoming_is_tuple_pairs:
+            new_history = history.copy()
+            new_history.append((message, err_msg))
+            return new_history, ""
+        else:
+            new_history = history.copy()
+            new_history.append({"role": "user", "content": message})
+            new_history.append({"role": "assistant", "content": err_msg})
+            return new_history, ""
+
+    # Append to history in same format it was received
+    if incoming_is_tuple_pairs:
+        new_history = history.copy()
+        new_history.append((message, reply))
+    else:
+        new_history = history.copy()
+        new_history.append({"role": "user", "content": message})
+        new_history.append({"role": "assistant", "content": reply})
+
+    # Return updated chatbot history and clear the input textbox
+    return new_history, ""
     
 # Clear all
 def clear_all():
-    """Wrapper to clear database and in-memory receipts."""
+    """Wrapper to clear database"""
     clear_db()
-    RECEIPTS.clear()
-    return "Database and receipts cleared successfully!"
-
+    return "Database cleared!"
 
 # Do extract
 def do_extract(files):
@@ -139,14 +178,12 @@ def do_extract(files):
                 rec = extract_from_image(data, name)
 
             # Save to database
-            stats = save_receipt_to_db(rec)
+            receipt_existed = save_receipt_to_db(rec)
 
             # Keep in memory too
-            RECEIPTS[rec.receipt_id] = rec
+            # RECEIPTS[rec.receipt_id] = rec
 
             result = rec.model_dump()
-            result["db_stats"] = stats
-            results.append(result)
         except Exception as e:
             print("[extract error]", name if 'name' in locals() else f, "->", e)
             traceback.print_exc()
@@ -177,6 +214,7 @@ def save_receipt_to_db(receipt: Receipt):
     )
     receipt.receipt_id = receipt_id 
 
+    # Add items
     if not receipt_existed:
         purchase_date = receipt.date or datetime.now().date().isoformat() # Also stored in receipt table
         
@@ -200,8 +238,7 @@ def save_receipt_to_db(receipt: Receipt):
                 comparison_price_unit=None
             )
     
-    stats = {"new": 0, "existing": 0}
-    return stats    
+    return receipt_existed    
 
 # Gradio Interface
 with gr.Blocks(title="Receipt Analyzer") as gradio_ux:
@@ -243,7 +280,6 @@ with gr.Blocks(title="Receipt Analyzer") as gradio_ux:
 
         # Load database view on tab open
         gradio_ux.load(view_db, outputs=db_output)
-
 
 # Init/Main
 if __name__ == "__main__":
