@@ -75,6 +75,7 @@ def add_receipt_to_db(
     connection = sqlite3.connect(DB_NAME)
     cursor = connection.cursor()
     
+    print(store_existed, date, total)
     if store_existed:
         # Duplicate detection by date + total (only if both provided)
         if date is not None and total is not None:
@@ -83,9 +84,11 @@ def add_receipt_to_db(
                 (date, total),
             )
             existing_receipt = cursor.fetchone()
+            print(existing_receipt)
             if existing_receipt:
                 connection.close()
-                return existing_receipt[0], False
+                return existing_receipt[0], True
+    
     # No duplicate found — insert new receipt
     cursor.execute(
         """
@@ -99,7 +102,7 @@ def add_receipt_to_db(
     receipt_id = cursor.lastrowid
     connection.close()
 
-    return receipt_id, True
+    return receipt_id, False
 
 def add_store_to_db(
     name: Optional[str] = None,
@@ -125,7 +128,7 @@ def add_store_to_db(
         existing_store = cursor.fetchone()
         if existing_store:
             connection.close()
-            return existing_store[0], False
+            return existing_store[0], True
 
     # Store doesn't exist, insert it
     cursor.execute(
@@ -140,7 +143,7 @@ def add_store_to_db(
     store_id = cursor.lastrowid
     connection.close()
 
-    return store_id, True
+    return store_id, False
 
 
 def add_item_to_db(

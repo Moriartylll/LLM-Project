@@ -35,7 +35,7 @@ pip install -r requirements.txt
 
 ### 5. Run the app
 ```bash
-python app.py
+python App.py
 ```
 
 ### 6. Access the app
@@ -53,6 +53,10 @@ http://127.0.0.1:7860
 python --version
 ```
 If it shows 3.14, try to use `python3.12` or `python3.11` instead.
+
+```bash
+python3 App.py # instead of python App.py
+```
 
 ### First Run Notes
 - **First run will be slow** - the app downloads:

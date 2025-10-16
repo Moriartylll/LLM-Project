@@ -116,8 +116,6 @@ def parse_lines_to_receipt(lines: List[str], file_name: str, source_type: str) -
     """Parse text lines into a structured Receipt object."""
     doc_id = str(uuid.uuid4())
     
-    print(lines[1])
-    
     # Extract vendor, store, address, postaladdress
     vendor = None
     store = None
