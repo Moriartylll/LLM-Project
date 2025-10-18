@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from typing import List, Optional, Dict
 
+DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2}|\d{2}[./-]\d{2}[./-]\d{2,4})")
 # Read file bytes from various input formats
 def read_file_bytes(f):
     if hasattr(f, "read"):
