@@ -1,0 +1,8 @@
+{
+  "field_accuracy": 0.0,
+  "item_precision": 0.0,
+  "item_recall": 0.0,
+  "item_f1": 0,
+  "latency_mean_s": null,
+  "n_files": 0
+}

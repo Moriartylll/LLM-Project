@@ -22,7 +22,7 @@ from parser import Receipt, extract_from_pdf, extract_from_image
 from utils import read_file_bytes
 
 # ---------------- Config ----------------
-CHAT_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+CHAT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant for Swedish shopping receipts. "
@@ -30,7 +30,6 @@ SYSTEM_PROMPT = (
     "If unsure, say you don't know."
 )
 
-# Human-readable schema/instruction for the receipts JSON that is prepended to the LLM prompt.
 RECEIPTS_SCHEMA = (
     "Receipts JSON structure:\n"
     "- A list of receipts. Each receipt object has:\n"
@@ -53,10 +52,25 @@ RECEIPTS_SCHEMA = (
 
 MAX_CTX_JSON_CHARS = 2048
 
-# Init chat model (GPU if available)
-tok = AutoTokenizer.from_pretrained(CHAT_MODEL)
-mdl = AutoModelForCausalLM.from_pretrained(CHAT_MODEL)
-chat = pipeline("text-generation", model=mdl, tokenizer=tok, max_new_tokens=256, temperature=0.2, top_p=0.9)
+# ---------------- Init chat model (Qwen2.5) ----------------
+
+tokenizer = AutoTokenizer.from_pretrained(CHAT_MODEL, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(
+    CHAT_MODEL,
+    device_map="auto",          # GPU if available, else CPU
+    torch_dtype="auto",
+    low_cpu_mem_usage=True
+)
+
+chat = pipeline(
+    "text-generation",
+    model=model,
+    tokenizer=tokenizer,
+    max_new_tokens=512,
+    do_sample=True,
+    temperature=0.2,
+    top_p=0.9,
+)
 
 
 # Build context
@@ -184,6 +198,7 @@ def do_extract(files):
             # RECEIPTS[rec.receipt_id] = rec
 
             result = rec.model_dump()
+            results.append(result)     # ← add this line
         except Exception as e:
             print("[extract error]", name if 'name' in locals() else f, "->", e)
             traceback.print_exc()

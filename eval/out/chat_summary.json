@@ -1,0 +1,6 @@
+{
+  "numeric_accuracy": 1.0,
+  "latency_mean_s": 4.34,
+  "n_q": 3,
+  "model": "Qwen/Qwen2.5-1.5B-Instruct"
+}

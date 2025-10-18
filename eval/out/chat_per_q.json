@@ -1,0 +1,26 @@
+[
+  {
+    "q": "What is my total spend overall?",
+    "ans": "To calculate your total spend overall:\n\n1. Sum up all the totals from each receipt.\n\nTotal spend = 112.9 + 62.95 + 134.85 + 502.0 = 812.7\n\nTherefore, your total spend overall is 812.7 SEK.",
+    "pred_num": 812.7,
+    "expect_num": 812.7,
+    "ok": true,
+    "latency_s": 4.43
+  },
+  {
+    "q": "What is my average spend per receipt?",
+    "ans": "To calculate your average spend per receipt:\n\n1. Sum up all the totals across all receipts.\n   Total = 112.9 + 62.95 + 134.85 + 502.0 = 812.7\n\n2. Count the number of receipts.\n   Number of receipts = 4\n\n3. Divide the total by the number of receipts to get the average.\n\nAverage spend per receipt = 812.7 / 4 = 203.175 SEK\n\nSo, your average spend per receipt is approximately 203.18 SEK.",
+    "pred_num": 203.18,
+    "expect_num": 203.18,
+    "ok": true,
+    "latency_s": 7.24
+  },
+  {
+    "q": "What is my total spend at ICA Nära Rosendal?",
+    "ans": "The total spend at ICA Nära Rosendal is SEK 502.0.",
+    "pred_num": 502.0,
+    "expect_num": 502.0,
+    "ok": true,
+    "latency_s": 1.36
+  }
+]
